@@ -10,8 +10,15 @@ using System.Text;
 
 namespace Tool
 {
-    public class UdpManager : ISocket
+    public class UdpManager : MonoBehaviour, ISocket
     {
+        public struct Data
+        {
+            public float xPositionR;
+            public float yPositionR;
+        }
+        public static UdpManager instance;
+
         public delegate void OnGetReceive(string message);
         public OnGetReceive onGetReceive;
 
@@ -22,21 +29,49 @@ namespace Tool
         IPEndPoint m_serverIPEndPoint;
         IPEndPoint m_receiveIPEndPoint;
         Thread m_parseDataThread;
+
         public string receivedData;
-        public double positionX;
-        public double positionY;
+        public float positionX;
+        public float positionY;
 
         bool m_isConnected;
+
+        public bool m_canParseData;
+
+        private void Awake()
+        {
+            if (instance == null)
+            {
+                instance = this;
+            }
+            else if (instance != this)
+            {
+                Debug.Log("Instance already exists, destroying object!");
+                Destroy(this);
+            }
+        }
 
         public bool IsConnected()
         {
             return m_isConnected;
         }
 
-        public void StopThreads()
+        public bool CanParseData()
         {
-            m_parseDataThread.Interrupt();
-            m_parseDataThread.Abort();
+            return m_canParseData;
+        }
+
+        public void StopParsingData()
+        {
+            if (CanParseData())
+            {
+                m_canParseData = false;
+            }
+            if (m_parseDataThread != null)
+            {
+                m_parseDataThread.Interrupt();
+                m_parseDataThread.Abort();
+            }
         }
 
         public void Connect(string ip, int port)
@@ -50,11 +85,12 @@ namespace Tool
             m_connectThread = new Thread(new ThreadStart(ReceiveMessage));
             m_connectThread.Start();
 
+            m_canParseData = true;
             m_parseDataThread = new Thread(new ThreadStart(ParseData));
             m_parseDataThread.Start();
         }
 
-        public void SendMessage(string data)
+        public void SendUDPMessage(string data)
         {
             if(IsConnected())
             {
@@ -86,6 +122,8 @@ namespace Tool
         {
             while(IsConnected())
             {
+                //Debug.Log($"Connect Thread");
+
                 try
                 {
                     m_result = new byte[1024];
@@ -94,28 +132,55 @@ namespace Tool
                     string msg = reader.ReadString();
                     //Debug.Log("Receive Message " + msg);
                     receivedData = msg;
-                } catch(Exception ex)
+                } 
+                catch(Exception ex)
                 {
                     Debug.Log("Receive error " + ex.Message);
                     Disconnect();
+                    StopParsingData();
                 }
             }
+            Debug.Log($"ReceiveMessage Ended");
         }
 
         public void ParseData()
         {
-            Debug.Log("wea 1");
-
-            while(IsConnected())
+            while(CanParseData())
             {
-                if (receivedData != null)
+                //Debug.Log($"Parse Thread");
+
+                try
                 {
-                    var splitData = receivedData.Split(';');
-                    Debug.Log($"wea 2: {splitData}");
-                    positionX = Convert.ToDouble(splitData[0]);
-                    positionY = Convert.ToDouble(splitData[1]);
+                    if (receivedData != null)
+                    {
+                        if (receivedData.Split(';').Length >= 2)
+                        {
+                            var splitData = receivedData.Split(';');
+                            float tempPosX = Convert.ToSingle(splitData[0]);
+                            float tempPosY = Convert.ToSingle(splitData[1]);
+
+                            positionX = ExtensionMethods.Map(tempPosX, 0, 640, Screen.width, 0);
+                            positionY = ExtensionMethods.Map(tempPosY, 0, 480, Screen.height, 0);
+                        }
+                    }
+                } 
+                catch(Exception ex)
+                {
+                    Debug.Log("Error " + ex.Message);
                 }
             }
+        }
+
+        private void OnApplicationQuit()
+        {
+            Disconnect();
+            StopParsingData();
+        }
+
+        private void OnDestroy()
+        {
+            Disconnect();
+            StopParsingData();
         }
     }
 
@@ -125,7 +190,7 @@ namespace Tool
 
         void Connect(string ip, int port);
 
-        void SendMessage(string data);
+        void SendUDPMessage(string data);
 
         void Disconnect();
 
